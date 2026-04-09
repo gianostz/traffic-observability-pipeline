@@ -40,7 +40,7 @@ Read these to understand the actual data flow:
 - **Pure transformations (the business rules)**: `src/common/transformations.py`
 - **The streaming job (the topology)**: `src/streaming/stream_processor.py`
 - **The producer (what enters the system)**: `src/generator/producer.py`
-- **Reference data**: `data/server_registry.json`
+- **Reference data**: `data/servers.csv`
 - **Serving DB schema**: `sql/init.sql`
 - **Local stack definition**: `docker-compose.yml`
 - **Spark image — version pins live here**: `docker/spark/Dockerfile`
@@ -97,7 +97,7 @@ Provide a concise summary covering:
 - Any uncommitted changes that look in-progress
 
 ### Risks & Watch-outs
-- Any version skew you can see between `docker/spark/Dockerfile` and `requirements.txt`
+- Any version skew you can see between `docker/spark/Dockerfile` and `pyproject.toml` / `uv.lock`
 - Any place where pure functions accidentally import `pyspark`
 - Any decision in `DECISIONS.md` that the current code appears to violate
 - Any file referenced in the PRD that does not exist yet

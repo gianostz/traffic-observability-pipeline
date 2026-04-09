@@ -42,7 +42,7 @@ Determine what kind of data project this is:
 Look at root configuration files:
 
 ```
-pyproject.toml / requirements.txt   → Python deps, pin discipline
+pyproject.toml / uv.lock            → Python deps, pin discipline (uv-managed)
 docker-compose.yml                  → local stack components
 docker/*/Dockerfile                 → JAR / Spark / Iceberg version pins
 spark-defaults.conf                 → Spark config, catalog config
@@ -52,7 +52,7 @@ grafana/provisioning/               → dashboards, datasources
 ```
 
 The Dockerfiles and `spark-defaults.conf` are usually where the **real** version pins
-live for a Spark project — not `requirements.txt`. Read them.
+live for a Spark project — not `pyproject.toml` / `uv.lock`. Read them.
 
 ### Map Directory Structure
 

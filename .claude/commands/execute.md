@@ -11,6 +11,23 @@ Read plan file: `$ARGUMENTS`
 
 ## Execution Instructions
 
+### 0. Pre-flight: Branch Check (STRICT — do this first)
+
+Per CLAUDE.md Working Convention #7, slices run on `slice/*` branches, never on
+`main`. Before reading the plan:
+
+1. Run `git rev-parse --abbrev-ref HEAD` and `git status --porcelain`.
+2. **STOP and refuse to execute if any of the following is true:**
+   - Current branch is `main`.
+   - Current branch does not match the pattern `slice/*`.
+   - The working tree has unrelated dirty state (untracked files or modifications
+     that aren't part of this slice).
+3. If the user is on `main`, instruct them to re-run `/plan-feature` (which sets
+   up the branch as its Phase 0) — do not silently create the branch yourself,
+   because the plan should already exist on the slice branch.
+
+Only proceed to Step 1 once the branch check passes.
+
 ### 1. Read and Understand
 
 - Read the ENTIRE plan carefully, including the "Notes" section.
@@ -137,7 +154,7 @@ Before declaring the slice complete:
 - ✅ Code follows the pure-vs-Spark-aware split
 - ✅ `DECISIONS.md` updated for every entry in the plan's Decisions section
 - ✅ No new hardcoded broker addresses, DB URLs, or file paths in `src/`
-- ✅ No new floating-version dependencies in `requirements.txt` or
+- ✅ No new floating-version dependencies in `pyproject.toml` / `uv.lock` or
   `docker/spark/Dockerfile`
 - ✅ Manual smoke test confirms the slice works end-to-end in the browser
 

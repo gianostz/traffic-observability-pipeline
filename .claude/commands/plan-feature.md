@@ -28,6 +28,28 @@ write the entry to `DECISIONS.md` in the same commit as the implementation.
 
 ## Planning Process
 
+### Phase 0: Branch Setup (STRICT — do this first)
+
+Per CLAUDE.md Working Convention #7, every slice runs on its own branch off `main`.
+Before any analysis:
+
+1. Run `git status` and `git rev-parse --abbrev-ref HEAD`.
+2. **STOP and ask the user how to proceed if any of the following is true:**
+   - The working tree is dirty (uncommitted or untracked changes that aren't part
+     of this slice).
+   - You are already on a `slice/*` branch from a previous slice.
+3. From a clean tree on `main`, derive the slice id:
+   - **Foundation slices:** use the PRD build-order id — `B1`, `B2`, `B3`, `B4`,
+     `B5`, `B6`. Branch name: `slice/<id>-<kebab-summary>` (e.g.
+     `slice/B1-foundation`, `slice/B3-spark-iceberg`).
+   - **Post-foundation slices:** short kebab name only — `slice/dlq-topic`,
+     `slice/device-type-breakdown`.
+4. Create and switch to the branch: `git switch -c slice/<id>-<kebab-summary>`.
+5. Confirm the new branch in your output before moving on to Phase 1.
+
+This is non-negotiable. A plan written on `main` is a bug — `/execute` will refuse
+to run it.
+
 ### Phase 1: Slice Understanding
 
 **Deep Slice Analysis:**

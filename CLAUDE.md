@@ -324,6 +324,18 @@ docker compose exec postgres psql -U postgres -d serving -c "
 6. **One writer per sink.** The Spark streaming application is the only writer to
    `lakehouse.web_events` and to every `serving.*` table. No ad-hoc `INSERT`s, no
    parallel maintenance jobs.
+7. **Branch per slice.** Every vertical slice runs on its own branch off `main`.
+   `/plan-feature` creates and switches to it as its first step; `/execute` refuses
+   to run on `main`. One slice = one branch = one PR back to `main`, so each slice
+   is a single reviewable unit and the matching `DECISIONS.md` entry sits inside it.
+   - **Naming:** `slice/<id>-<kebab-summary>` where `<id>` is the PRD build-order id
+     for foundation slices (`slice/B1-foundation`, `slice/B2-generator-kafka`,
+     `slice/B3-spark-iceberg`, …). Post-foundation slices use a short kebab name
+     (`slice/dlq-topic`, `slice/device-type-breakdown`).
+   - **Enforcement is strict, not advisory.** `/plan-feature` and `/execute` STOP
+     if the working tree is dirty or if the current branch is `main`.
+   - **Merge style:** PR back to `main`. No direct commits to `main` after the
+     foundation bootstrap.
 
 ---
 
