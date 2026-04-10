@@ -30,6 +30,9 @@ their status line, not by editing the original.
 | D-008 | Test split: unit (pure fns) + integration via testcontainers     | Accepted |
 | D-009 | 2-minute event-time watermark, drop-and-count later events       | Accepted |
 | D-010 | Grafana reads from Postgres, not directly from Iceberg           | Accepted |
+| D-011 | Compose skeleton declares only kafka, postgres, grafana; spark and generator deferred | Accepted |
+| D-012 | Grafana image is `grafana/grafana`, not `grafana/grafana-oss`    | Accepted |
+| D-013 | Kafka image is `apache/kafka:4.0.2`, not Confluent or Bitnami   | Accepted |
 
 ---
 
@@ -523,3 +526,134 @@ Postgres write happens inside the same `foreachBatch` as the Iceberg write.
 - The dashboard needs to support ad-hoc historical queries that are not
   pre-aggregated, OR
 - Postgres becomes a bottleneck in a way Iceberg-backed serving would solve.
+
+---
+
+## D-011 — Compose skeleton declares only kafka, postgres, grafana; spark and generator deferred
+
+**Status:** Accepted
+**Date:** 2026-04-10
+**Tags:** docker-compose, infrastructure, slicing
+
+### Context
+
+PRD §12 calls B1 a "skeleton with placeholder services". The obvious read is
+"declare all six services with TODO config". But the `spark` service needs a custom
+Dockerfile with Iceberg/Kafka/JDBC JARs (owned by B3) and the `generator` needs its
+own image (owned by B2). Neither can run on a stock image today.
+
+### Decision
+
+Declare only kafka, postgres, and grafana — the three services that can run on
+stock upstream images with full healthchecks, named volumes, and env-var
+substitution. Add spark in B3 and generator in B2, each in the slice that builds
+the custom image.
+
+### Consequences
+
+- **Positive:** `docker compose up -d kafka postgres grafana` works from day 1.
+  Healthchecks are live so future slices can use `depends_on ... service_healthy`.
+  Slice ownership is crisp: each service is introduced by the slice that owns its
+  image and code.
+- **Negative:** The compose file is not "complete" in B1 — a reader seeing it for
+  the first time may wonder where Spark and the generator are.
+- **Mitigation:** The PRD's "skeleton with placeholder services" wording is loose
+  enough to accommodate this reading, and the running skeleton is more valuable than
+  a complete but broken one.
+
+### Alternatives considered
+
+- **Declare all six services with `image:` placeholders for spark/generator.**
+  Rejected: there is no upstream image for the generator, and the official Spark
+  image needs a custom layer for Iceberg+Kafka+JDBC JARs that B3 owns.
+- **Declare all six with empty `build:` directives.** Rejected: `docker compose
+  config` fails because the Dockerfile paths do not exist.
+
+### Revisit when
+
+- All five building-block slices (B1–B5) have landed and the compose file is
+  complete, making this decision historical context only.
+
+---
+
+## D-012 — Grafana image is `grafana/grafana`, not `grafana/grafana-oss`
+
+**Status:** Accepted
+**Date:** 2026-04-10
+**Tags:** grafana, docker, infrastructure
+
+### Context
+
+CLAUDE.md and PRD §8 both say "Grafana OSS". The `grafana/grafana-oss` Docker Hub
+repository is being EOL'd starting with the 12.4.0 release; Grafana Labs now
+publishes the same OSS binary under the `grafana/grafana` image name. The choice of
+*Grafana OSS* (vs Grafana Enterprise / Cloud) is unchanged — only the image name is.
+
+### Decision
+
+Pin `grafana/grafana:12.4.2` in `docker-compose.yml`. This is the actively
+maintained image that ships the same OSS binary previously found under
+`grafana/grafana-oss`.
+
+### Consequences
+
+- **Positive:** We pin to an actively maintained image. No risk of the image name
+  going stale.
+- **Negative:** None — the OSS binary, the license, and the demo behavior are
+  identical.
+
+### Alternatives considered
+
+- **Pin `grafana/grafana-oss:12.4.2`.** Rejected: the repo is being deprecated
+  and will stop receiving updates. Pinning a tag in a deprecated repo at bootstrap
+  invites a forced migration later.
+
+### Revisit when
+
+- The `grafana/grafana` image changes its licensing or binary in a way that
+  matters for this demo.
+
+---
+
+## D-013 — Kafka image is `apache/kafka:4.0.2`, not Confluent or Bitnami
+
+**Status:** Accepted
+**Date:** 2026-04-10
+**Tags:** kafka, docker, infrastructure
+
+### Context
+
+D-007 already locks in "KRaft mode, single broker, single partition". The remaining
+choice is *which* Docker image to run. The three plausible options are the official
+Apache image (`apache/kafka`), Confluent's image (`confluentinc/cp-kafka`), and
+Bitnami's image (`bitnami/kafka`).
+
+### Decision
+
+`apache/kafka:4.0.2`. The official upstream Apache Kafka image (since KIP-975).
+Kafka 4.x is KRaft-only by design (ZooKeeper removed entirely), which hard-enforces
+D-007 at the image level.
+
+### Consequences
+
+- **Positive:** Official upstream — no third-party packaging in the dependency
+  graph. KRaft-only means zero chance of accidentally misconfiguring ZooKeeper mode.
+  The 4.x client protocol is wire-compatible with Spark 3.5's `spark-sql-kafka`
+  connector (Kafka protocol versioning guarantees this).
+- **Negative:** Kafka 4.x is newer than the Confluent/Bitnami images most tutorials
+  reference, so some Stack Overflow answers may not apply directly.
+- **Mitigation:** The KRaft env-var surface is documented in the official quickstart
+  and is straightforward for a single-broker setup.
+
+### Alternatives considered
+
+- **`confluentinc/cp-kafka`.** Rejected: bundles Confluent-specific config
+  conventions and a heavier base layer. Unnecessary for a single-broker laptop demo.
+- **`bitnami/kafka`.** Rejected: well-maintained but a third-party packaging that
+  adds a dependency on Bitnami's release cadence.
+
+### Revisit when
+
+- The Spark Kafka connector breaks compatibility with Kafka 4.x (unlikely given
+  protocol versioning), OR
+- A Confluent-specific feature (Schema Registry, etc.) becomes needed.
