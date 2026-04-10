@@ -35,6 +35,7 @@ class GeneratorConfig:
 
     rate_per_sec: int
     jitter_seconds: int
+    server_registry_path: str
 
 
 @dataclass(frozen=True)
@@ -87,6 +88,7 @@ def load_generator_config() -> GeneratorConfig:
     return GeneratorConfig(
         rate_per_sec=_get_int("GENERATOR_RATE_PER_SEC", 10),
         jitter_seconds=_get_int("GENERATOR_JITTER_SECONDS", 30),
+        server_registry_path=_get("SERVER_REGISTRY_PATH", "data/servers.csv"),
     )
 
 

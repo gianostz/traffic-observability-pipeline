@@ -73,6 +73,25 @@ services:
     volumes:
       - grafana_data:/var/lib/grafana
 
+  generator:
+    build:
+      context: .
+      dockerfile: docker/generator/Dockerfile
+    container_name: top-generator
+    hostname: generator
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: ${KAFKA_TOPIC:-web_events}
+      GENERATOR_RATE_PER_SEC: ${GENERATOR_RATE_PER_SEC:-10}
+      GENERATOR_JITTER_SECONDS: ${GENERATOR_JITTER_SECONDS:-30}
+      SERVER_REGISTRY_PATH: /app/data/servers.csv
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - top-net
+
 volumes:
   kafka_data:
   postgres_data:

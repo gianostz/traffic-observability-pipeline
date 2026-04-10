@@ -33,6 +33,10 @@ their status line, not by editing the original.
 | D-011 | Compose skeleton declares only kafka, postgres, grafana; spark and generator deferred | Accepted |
 | D-012 | Grafana image is `grafana/grafana`, not `grafana/grafana-oss`    | Accepted |
 | D-013 | Kafka image is `apache/kafka:4.0.2`, not Confluent or Bitnami   | Accepted |
+| D-014 | `confluent-kafka` over `kafka-python` for the generator producer | Accepted |
+| D-015 | `schemas.py` is pure Python; `StructType` construction deferred to `src/streaming/` | Accepted |
+| D-016 | Generator reads `servers.csv` at startup, not from a config-provided list | Accepted |
+| D-017 | Integration test for producer to Kafka via testcontainers          | Accepted |
 
 ---
 
@@ -657,3 +661,172 @@ D-007 at the image level.
 - The Spark Kafka connector breaks compatibility with Kafka 4.x (unlikely given
   protocol versioning), OR
 - A Confluent-specific feature (Schema Registry, etc.) becomes needed.
+
+---
+
+## D-014 — `confluent-kafka` over `kafka-python` for the generator producer
+
+**Status:** Accepted
+**Date:** 2026-04-10
+**Tags:** generator, kafka, dependencies
+
+### Context
+
+The generator needs a Python Kafka client to produce events. PRD §6 lists both
+`confluent-kafka` (librdkafka-based, pre-built wheels) and `kafka-python`
+(pure Python) as options.
+
+### Decision
+
+Use `confluent-kafka`. Pinned at `==2.14.0` in the generator Docker image
+(`docker/generator/requirements.txt`) and `>=2.14` as a dev dependency in
+`pyproject.toml` for the integration test and mypy.
+
+### Consequences
+
+- **Positive:** Actively maintained (latest release April 2026). Pre-built
+  manylinux wheels bundle librdkafka — no system-level C deps at install time
+  on `python:3.11-slim`. Compatible with Kafka 4.x via protocol versioning.
+  Significantly higher throughput than `kafka-python` (irrelevant at 10 ev/s
+  but removes a future concern).
+- **Negative:** The C extension makes cross-compilation harder if the project
+  ever targets non-x86 architectures.
+
+### Alternatives considered
+
+- **`kafka-python`.** Rejected: effectively unmaintained since late 2023. Last
+  PyPI release predates Kafka 3.7. Risk of silent incompatibility with Kafka
+  4.x protocol changes.
+
+### Revisit when
+
+- `confluent-kafka` introduces a breaking change in its Producer API, OR
+- The project needs to run on an architecture without pre-built wheels.
+
+---
+
+## D-015 — `schemas.py` is pure Python; `StructType` construction deferred to `src/streaming/`
+
+**Status:** Accepted
+**Date:** 2026-04-10
+**Tags:** architecture, schemas, pure-vs-spark
+
+### Context
+
+`src/common/schemas.py` is listed in the PRD as holding the explicit
+`StructType` for the Kafka payload. But `src/common/` must not import `pyspark`
+(CLAUDE.md structural rule, NFR-3.1). A `StructType` requires
+`from pyspark.sql.types import ...`.
+
+### Decision
+
+Define the event schema as pure Python in `src/common/schemas.py` — field names
+and type labels as tuples, plus domain constants (path templates, status-code
+weights, HTTP methods, user-agent pool). The `StructType` builder will live in
+`src/streaming/` and will be built in B3.
+
+### Consequences
+
+- **Positive:** Preserves the structural rule without exception. The generator
+  imports the field names but not the `StructType`. The pure schema is
+  unit-testable without a SparkSession. Domain constants are shared between
+  the generator and future transformation tests.
+- **Negative:** The schema is "split" across two files — pure definitions in
+  `src/common/schemas.py` and the Spark type mapping in `src/streaming/`.
+
+### Alternatives considered
+
+- **Make `schemas.py` the exception to the pyspark ban.** Rejected: one
+  exception invites more; the sub-second unit test guarantee depends on no
+  Spark imports under `src/common/`.
+- **Move `schemas.py` to `src/streaming/`.** Rejected: the generator needs the
+  field names and constants, and `src/generator/` should not import from
+  `src/streaming/`.
+
+### Revisit when
+
+- The schema split causes confusion or duplication bugs across more than two
+  consumers.
+
+---
+
+## D-016 — Generator reads `servers.csv` at startup, not from a config-provided list
+
+**Status:** Accepted
+**Date:** 2026-04-10
+**Tags:** generator, configuration, data
+
+### Context
+
+The generator needs valid `server_id` values. Options are (a) read
+`data/servers.csv` at startup, (b) hardcode a list in the generator, (c) accept
+a comma-separated env var.
+
+### Decision
+
+Read `data/servers.csv` at startup. The file path is configurable via the
+`SERVER_REGISTRY_PATH` environment variable (default: `data/servers.csv`).
+
+### Consequences
+
+- **Positive:** Single source of truth. The same file is broadcast-joined in B3.
+  If the registry changes, both the generator and the enrichment join see the
+  same data. No synchronization burden.
+- **Negative:** The generator Docker image must include the CSV file (via
+  `COPY data/ data/` in the Dockerfile). Changes to the registry require
+  rebuilding the image.
+- **Mitigation:** `docker compose up -d --build` rebuilds automatically.
+  The registry is expected to be static during a demo run.
+
+### Alternatives considered
+
+- **Hardcode a list in the generator.** Rejected: creates a second source of
+  truth that will drift from `data/servers.csv`.
+- **Comma-separated env var.** Rejected: fragile for 30+ server IDs and does
+  not carry the region/datacenter/service metadata that B3 needs for enrichment.
+
+### Revisit when
+
+- The registry needs to be updated without rebuilding the generator image.
+
+---
+
+## D-017 — Integration test for producer to Kafka via testcontainers
+
+**Status:** Accepted
+**Date:** 2026-04-10
+**Tags:** testing, generator, kafka
+
+### Context
+
+Unit tests validate the pure event-generation functions but do not exercise the
+serialization path (JSON encoding) or the actual Kafka produce/consume
+round-trip. A broken serialization or a field-name typo would only surface after
+a full `docker compose up -d` + manual `kafka-console-consumer` check.
+
+### Decision
+
+Add a testcontainers-based integration test that produces events to a real Kafka
+broker, consumes them back, and asserts schema conformance (all 10 fields
+present, correct types, valid UTF-8 JSON).
+
+### Consequences
+
+- **Positive:** Catches serialization bugs and field-name mismatches
+  automatically, without requiring the full stack. Lightweight (~15–20 s,
+  just a Kafka container). Complements the manual smoke test.
+- **Negative:** Adds `confluent-kafka` and `testcontainers[kafka]` to the host
+  dev dependencies. Requires Docker to be running for the integration test suite.
+- **Mitigation:** Both dependencies are already budgeted for B3+. Docker is
+  already a requirement for `docker compose up -d`.
+
+### Alternatives considered
+
+- **No integration test — validate only via manual kafka-console-consumer.**
+  Rejected: manual validation is fragile, not repeatable, and not CI-friendly.
+
+### Revisit when
+
+- The integration test runtime becomes a bottleneck in the test suite, OR
+- A different serialization format (Avro, Protobuf) replaces JSON and requires
+  a different validation approach.

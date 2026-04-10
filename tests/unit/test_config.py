@@ -46,6 +46,22 @@ def test_generator_config_coerces_int() -> None:
     assert cfg.jitter_seconds == 5
 
 
+def test_generator_config_server_registry_path_default() -> None:
+    with patch.dict(os.environ, {}, clear=True):
+        cfg = load_generator_config()
+    assert cfg.server_registry_path == "data/servers.csv"
+
+
+def test_generator_config_server_registry_path_from_env() -> None:
+    with patch.dict(
+        os.environ,
+        {"SERVER_REGISTRY_PATH": "/app/data/servers.csv"},
+        clear=True,
+    ):
+        cfg = load_generator_config()
+    assert cfg.server_registry_path == "/app/data/servers.csv"
+
+
 def test_postgres_config_jdbc_url() -> None:
     with patch.dict(
         os.environ,
