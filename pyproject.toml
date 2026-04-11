@@ -12,6 +12,7 @@ dev = [
     "pytest>=8.0",
     "confluent-kafka>=2.14",
     "testcontainers[kafka]>=4.0",
+    "pyspark>=3.5,<3.6",
 ]
 
 [tool.ruff]

@@ -5,27 +5,10 @@ import json
 import uuid
 from datetime import UTC, datetime
 
-import pytest
 from confluent_kafka import Consumer, Producer
-from testcontainers.kafka import KafkaContainer
 
 from src.common.schemas import EVENT_FIELDS, STATUS_CODE_WEIGHTS, USER_AGENTS
 from src.generator.producer import generate_event, load_server_ids
-
-
-@pytest.fixture(scope="session")
-def kafka_container() -> KafkaContainer:
-    """Start a Kafka container for the test session."""
-    container = KafkaContainer()
-    container.start()
-    yield container  # type: ignore[misc]
-    container.stop()
-
-
-@pytest.fixture(scope="session")
-def bootstrap_server(kafka_container: KafkaContainer) -> str:
-    """Return the bootstrap server address for the running Kafka container."""
-    return kafka_container.get_bootstrap_server()
 
 
 def test_produce_and_consume_events(bootstrap_server: str) -> None:

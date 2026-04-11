@@ -37,6 +37,9 @@ their status line, not by editing the original.
 | D-015 | `schemas.py` is pure Python; `StructType` construction deferred to `src/streaming/` | Accepted |
 | D-016 | Generator reads `servers.csv` at startup, not from a config-provided list | Accepted |
 | D-017 | Integration test for producer to Kafka via testcontainers          | Accepted |
+| D-018 | Pinned JAR versions: Spark 3.5.8, Iceberg 1.10.1, Kafka connector 3.5.8, JDBC 42.7.10 | Accepted |
+| D-019 | `pyspark>=3.5,<3.6` as host dev dependency                       | Accepted |
+| D-020 | Integration test for Kafka→Spark→Iceberg path via testcontainers | Accepted |
 
 ---
 
@@ -830,3 +833,134 @@ present, correct types, valid UTF-8 JSON).
 - The integration test runtime becomes a bottleneck in the test suite, OR
 - A different serialization format (Avro, Protobuf) replaces JSON and requires
   a different validation approach.
+
+---
+
+## D-018 — Pinned JAR versions: Spark 3.5.8, Iceberg 1.10.1, Kafka connector 3.5.8, JDBC 42.7.10
+
+**Status:** Accepted
+**Date:** 2026-04-11
+**Tags:** spark, iceberg, kafka, jars, infrastructure
+
+### Context
+
+B3 introduces the Spark container with custom JARs. The Spark/Iceberg/Hadoop
+version triangle is the highest-risk component in the stack (PRD §14). Every JAR
+must be pinned explicitly to avoid classpath collisions and silent version drift.
+
+### Decision
+
+Mixed download strategy in `docker/spark/Dockerfile`:
+- **Direct download** for `iceberg-spark-runtime-3.5_2.12-1.10.1.jar` (fat JAR,
+  no transitives) and `postgresql-42.7.10.jar` (standalone).
+- **Ivy-resolved at Docker build time** for `spark-sql-kafka-0-10_2.12:3.5.8` so
+  its transitives (`kafka-clients`, `commons-pool2`) are pulled by Maven dependency
+  resolution, not manually pinned.
+
+### Consequences
+
+- **Positive:** Respects the CLAUDE.md hard rule ("do not pin `kafka-clients`,
+  `commons-pool2` explicitly"). The Iceberg runtime is a shaded fat JAR that
+  bundles everything. Ivy resolution at build time means no internet needed at
+  container start.
+- **Negative:** The Docker build requires internet access for Ivy resolution on
+  first build.
+- **Mitigation:** Docker layer caching means the Ivy step is only re-run when
+  the `SPARK_VERSION` ARG changes.
+
+### Alternatives considered
+
+- **Pin all JARs via direct download.** Rejected: manually pinning
+  `kafka-clients` and `commons-pool2` violates CLAUDE.md and risks serialization
+  errors from version mismatches.
+- **Use `--packages` at runtime.** Rejected: requires internet at container start
+  and adds latency to every restart.
+
+### Revisit when
+
+- A JAR version bump is needed (requires its own plan per CLAUDE.md), OR
+- Spark 4.x migration makes the Iceberg runtime incompatible.
+
+---
+
+## D-019 — `pyspark>=3.5,<3.6` as host dev dependency
+
+**Status:** Accepted
+**Date:** 2026-04-11
+**Tags:** dependencies, testing, mypy
+
+### Context
+
+`src/streaming/` imports `pyspark`. NFR-3.3 requires `uv run mypy src` to pass,
+which requires resolving PySpark types on the host. The integration test also
+needs a host-side SparkSession to validate the Kafka→Spark→Iceberg path.
+
+### Decision
+
+Add `pyspark>=3.5,<3.6` to the `dev` dependency group in `pyproject.toml`.
+
+### Consequences
+
+- **Positive:** The streaming code is type-checked like everything else. The
+  integration test can boot a real SparkSession on the host. The version
+  constraint matches the Docker image (3.5.8).
+- **Negative:** PySpark pulls in `py4j` and a JVM dependency, adding ~300 MB to
+  the host dev environment.
+- **Mitigation:** It is a dev-only dependency — the production path runs inside
+  Docker where PySpark is bundled with the Spark image.
+
+### Alternatives considered
+
+- **Exclude `src/streaming/` from mypy.** Rejected: streaming code is
+  high-risk and should be type-checked like everything else.
+- **Use third-party stubs only.** Rejected: PySpark stubs are incomplete;
+  the real package is needed for the integration test anyway.
+
+### Revisit when
+
+- PySpark's host-side install size becomes a CI bottleneck, OR
+- The project moves to a Scala Spark implementation.
+
+---
+
+## D-020 — Integration test for Kafka→Spark→Iceberg path via testcontainers
+
+**Status:** Accepted
+**Date:** 2026-04-11
+**Tags:** testing, spark, iceberg, kafka
+
+### Context
+
+B3 introduces the Spark/Iceberg/Kafka classpath — the highest-risk part of the
+stack. Unit tests validate pure functions but cannot catch classpath collisions,
+Iceberg catalog config bugs, or Kafka connector wire-protocol issues.
+
+### Decision
+
+Add a focused integration test in B3 (`tests/integration/test_spark_iceberg.py`)
+that produces events to testcontainers Kafka, reads them via Spark's Kafka
+connector, enriches via broadcast join, and writes to a temp Iceberg warehouse on
+local FS.
+
+### Consequences
+
+- **Positive:** Catches JAR skew, catalog config bugs, and schema mapping issues
+  automatically. Reuses the existing testcontainers Kafka fixture. The
+  SparkSession is session-scoped to amortize boot cost (D-008). Uses
+  `spark.jars.packages` to resolve the same JARs the Dockerfile uses — validates
+  that the Maven coordinates are correct.
+- **Negative:** Adds ~2 minutes to the integration test suite (SparkSession boot
+  + Ivy resolution on first run).
+- **Mitigation:** Session-scoped fixture means the SparkSession boots once per
+  `pytest` invocation. Ivy cache makes subsequent runs faster.
+
+### Alternatives considered
+
+- **Defer to B6, validate only via manual smoke test.** Rejected: the classpath
+  is where B3 is most likely to break. Manual validation is not repeatable or
+  CI-friendly.
+
+### Revisit when
+
+- The integration test runtime creeps past 5 minutes, OR
+- A pattern of bugs appears that the integration test does not catch.
