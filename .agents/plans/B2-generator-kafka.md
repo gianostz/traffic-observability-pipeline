@@ -756,7 +756,7 @@ docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh \
 - `status_code` is a string instead of an integer → serialization bug.
 - `event_ts` is far from wall clock (e.g. hours off) → jitter logic is wrong.
 
-### Step 5: Verify the event rate
+### Step 5: Verify the topic is receiving events continuously
 
 ```bash
 docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh \
@@ -764,13 +764,19 @@ docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh \
   --timeout-ms 10000 2>/dev/null | wc -l
 ```
 
-**What "good" looks like:** approximately 100 lines (10 ev/s x 10 seconds). Anywhere
-in the range 80–120 is fine — timing is not exact.
+`--timeout-ms` here is an *idle* timeout: the consumer exits only after 10 seconds
+with no new message. At the target rate of 10 ev/s (gaps ~100 ms), the idle timeout
+should never fire, so the command should keep running until you Ctrl+C it. This
+gives a liveness signal: events are flowing steadily, with no multi-second gap.
+
+**What "good" looks like:** the command keeps printing events and does not exit on
+its own. Interrupt it after a few seconds with Ctrl+C.
 
 **What "bad" looks like:**
-- Significantly fewer (< 50) → the generator may be sleeping too long, crashing and
-  restarting, or blocked on Kafka produce calls.
-- Significantly more (> 200) → the rate limiter is not working.
+- Command exits on its own and `wc -l` prints `0` → no events arrived in 10 s. The
+  generator is not producing (crashed, blocked on Kafka, sleeping too long).
+- Command exits on its own with a small count → events stopped partway through,
+  suggesting the generator crashed or stalled mid-run.
 
 ### Step 6: Pretty-print one event (optional, for readability)
 

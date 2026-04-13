@@ -92,10 +92,41 @@ services:
     networks:
       - top-net
 
+  spark:
+    build:
+      context: .
+      dockerfile: docker/spark/Dockerfile
+    container_name: top-spark
+    hostname: spark
+    ports:
+      - "4040:4040"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: ${KAFKA_TOPIC:-web_events}
+      SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-2g}
+      SPARK_EXECUTOR_MEMORY: ${SPARK_EXECUTOR_MEMORY:-2g}
+      SPARK_CHECKPOINT_DIR: /opt/checkpoints/web_events
+      ICEBERG_WAREHOUSE_DIR: /opt/warehouse
+      ICEBERG_CATALOG: lakehouse
+      ICEBERG_TABLE: web_events
+      WATERMARK_DURATION: ${WATERMARK_DURATION:-2 minutes}
+      SERVER_REGISTRY_PATH: /app/data/servers.csv
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - top-net
+    volumes:
+      - spark_warehouse:/opt/warehouse
+      - spark_checkpoints:/opt/checkpoints
+
 volumes:
   kafka_data:
   postgres_data:
   grafana_data:
+  spark_warehouse:
+  spark_checkpoints:
 
 networks:
   top-net:
